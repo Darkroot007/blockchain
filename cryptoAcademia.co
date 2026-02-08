@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>TLS 1.3 with SLH-DSA – Engineering Notes</title>
+<style>
+/* Screen layout (single column, readable) */
+body {
+  font-family: "Times New Roman", Times, serif;
+  background: #020617;
+  color: #e5e7eb;
+  line-height: 1.6;
+  max-width: 900px;
+  margin: auto;
+  padding: 3rem 1.5rem;
+}
+
+h1 {
+  font-size: 1.9rem;
+  margin-bottom: 0.5rem;
+}
+
+h2 {
+  font-size: 1.3rem;
+  margin-top: 2.5rem;
+}
+
+.meta {
+  color: #94a3b8;
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+}
+
+pre.diagram {
+  background: #020617;
+  border: 1px solid #1e293b;
+  padding: 1rem;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+.figure {
+  margin: 1.5rem 0;
+}
+
+.figcaption {
+  font-size: 0.85rem;
+  text-align: center;
+  margin-top: 0.4rem;
+  color: #cbd5f5;
+}
+
+/* Print / PDF: IEEE-style two-column layout */
+@media print {
+  body {
+    background: white;
+    color: black;
+    font-size: 10pt;
+    line-height: 1.35;
+    max-width: none;
+    padding: 2cm;
+    column-count: 2;
+    column-gap: 1.2cm;
+  }
+
+  h1 {
+    column-span: all;
+    text-align: center;
+    font-size: 16pt;
+  }
+
+  .meta {
+    column-span: all;
+    text-align: center;
+    font-size: 9pt;
+    margin-bottom: 1.5rem;
+  }
+
+  h2 {
+    font-size: 11pt;
+    page-break-after: avoid;
+  }
+
+  pre.diagram {
+    background: #f8f8f8;
+    color: black;
+    border: 1px solid #ccc;
+    page-break-inside: avoid;
+    font-size: 8pt;
+  }
+
+  .figure {
+    page-break-inside: avoid;
+  }
+
+  .figcaption {
+    color: black;
+  }
+}
+</style>
+</head>
+<body>
+
+<h1>TLS 1.3 with SLH-DSA: An Engineer’s Walkthrough</h1>
+
+# TLS 1.3 with SLH-DSA: An Engineer’s Walkthrough
+
+<p class="meta">Crypto & Network Security Blog · Post‑Quantum TLS · Practical Engineering</p>
+
+<p>
+TLS 1.3 was designed with a very clean separation of concerns: key exchange,
+authentication, and record protection are mostly independent. That design
+choice turns out to be extremely useful when experimenting with new
+cryptographic primitives.
+</p>
+
+<p>
+RFC&nbsp;9909 builds on this flexibility and shows how
+<strong>SLH‑DSA</strong>, a post‑quantum, hash‑based signature scheme, can be
+used for authentication in TLS&nbsp;1.3. Importantly, this does <em>not</em>
+change the structure of the handshake. From the protocol’s point of view,
+SLH‑DSA is just another signature algorithm.
+</p>
+
+<h2>Where SLH‑DSA Fits in the TLS Handshake</h2>
+
+<p>
+TLS uses digital signatures in exactly two places during the handshake:
+</p>
+
+<ul>
+  <li>To authenticate the server (and optionally the client)</li>
+  <li>To bind the handshake transcript to the authenticated identity</li>
+</ul>
+
+<p>
+SLH‑DSA replaces ECDSA or RSA in those steps. Everything else—key exchange,
+HKDF, record encryption—stays unchanged.
+</p>
+
+<div class="figure">
+<pre class="diagram">$1</pre>
+<div class="figcaption">Figure 4 — TLS CertificateVerify with SLH-DSA</div>
+</div>
+
+<p>
+The handshake messages are identical to a classical TLS 1.3 handshake. The
+only difference is the algorithm used to generate and verify the signature in
+<code>CertificateVerify</code>.
+</p>
+
+<h2>TLS Handshake State Machine (Authentication View)</h2>
+
+<p>
+From an implementation perspective, it helps to think in terms of states.
+Below is the authentication‑relevant slice of the TLS 1.3 state machine.
+Nothing here is specific to SLH‑DSA—the algorithm plugs into an existing
+transition.
+</p>
+
+<pre class="diagram">
+[Start]
+   |
+   v
+[ClientHello Sent]
+   |
+   v
+[ServerHello Recvd]
+   |
+   v
+[Certificate Recvd]
+   |
+   v
+[Verify Certificate Signature]
+   |
+   v
+[Handshake Finished]
+</pre>
+
+<p>
+The verification step simply switches from ECDSA/RSA logic to SLH‑DSA
+verification. The surrounding protocol logic remains untouched.
+</p>
+
+<h2>Why SLH‑DSA?</h2>
+
+<p>
+SLH‑DSA is part of the NIST post‑quantum standardization effort. It is based
+entirely on hash functions and avoids algebraic structures like lattices or
+elliptic curves.
+</p>
+
+<p>
+That design makes it conservative. If your threat model includes long‑term
+harvest‑now‑decrypt‑later attacks, this conservatism can be attractive.
+</p>
+
+<h2>Engineering Tradeoffs: SLH‑DSA vs Dilithium</h2>
+
+<p>
+In practice, SLH‑DSA is rarely the first post‑quantum signature engineers reach
+for. Dilithium is usually the default choice. The reason is simple: tradeoffs.
+</p>
+
+<pre>
+SLH‑DSA
+  • Hash‑based, minimal assumptions
+  • Very strong long‑term security story
+  • Large public keys and signatures
+  • Slower signing and verification
+
+Dilithium
+  • Lattice‑based design
+  • Compact signatures
+  • Fast verification
+  • Newer hardness assumptions
+</pre>
+
+<p>
+For most web‑scale TLS deployments, Dilithium is easier to deploy without
+impacting latency or handshake size. SLH‑DSA makes more sense in environments
+where long‑term cryptographic conservatism outweighs performance concerns.
+</p>
+
+<h2>Certificates and ASN.1 (What You Actually Need to Care About)</h2>
+
+<p>
+TLS implementations typically fail not in the handshake logic, but in
+certificate parsing. SLH‑DSA keys are carried in X.509 certificates using
+standard ASN.1 structures.
+</p>
+
+<p>
+At a high level, the public key appears in <code>SubjectPublicKeyInfo</code>.
+There are no algorithm parameters; the raw public key bytes are carried
+directly.
+</p>
+
+<pre>
+SubjectPublicKeyInfo ::= SEQUENCE {
+  algorithm         AlgorithmIdentifier,
+  subjectPublicKey  BIT STRING
+}
+
+AlgorithmIdentifier ::= SEQUENCE {
+  algorithm   id-slh-dsa-256s-shake,
+  parameters  ABSENT
+}
+</pre>
+
+<p>
+If you are implementing support, pay close attention to length handling and
+BIT STRING parsing. Most real‑world bugs show up here.
+</p>
+
+<h2>Operational Considerations</h2>
+
+<p>
+Deploying SLH‑DSA in TLS has immediate operational consequences:
+</p>
+
+<ul>
+  <li>Larger handshake messages</li>
+  <li>Higher CPU cost during authentication</li>
+  <li>No impact on symmetric crypto or record protection</li>
+</ul>
+
+<p>
+Because TLS 1.3 authenticates early, the cost is paid once per connection. In
+many deployments, that cost is acceptable if connections are long‑lived.
+</p>
+
+<h2>Takeaway</h2>
+<p>
+RFC&nbsp;9909 demonstrates that TLS&nbsp;1.3 possesses strong cryptographic
+agility without sacrificing protocol stability. The integration of SLH-DSA
+is confined to the authentication path and does not affect key establishment
+or record-layer protection.
+</p>
+
+<p>
+From an implementation perspective, supporting SLH-DSA primarily involves
+algorithm negotiation, certificate parsing, and signature verification logic.
+No modifications to the core TLS state machine are required.
+</p>
+
+<h2>Extended Analysis and Design Discussion</h2>
+<p>
+This section expands the discussion to cover protocol context, design
+rationale, implementation considerations, and operational tradeoffs in
+sufficient depth to support archival and instructional use. The presentation
+follows conventions commonly found in IEEE and ACM conference papers.
+</p>
+
+<h2>Background: TLS 1.3 Design Goals</h2>
+<p>
+TLS 1.3 was standardized with explicit goals of reducing handshake latency,
+removing legacy cryptographic constructions, and improving formal
+verifiability. The protocol minimizes round trips, encrypts more handshake
+messages, and enforces a clean separation between key establishment,
+authentication, and record protection.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+Client                                   Server
+------                                   ------
+ClientHello        -------------------->
+                    ServerHello
+                    EncryptedExtensions
+                    Certificate
+                    CertificateVerify
+                    Finished       <--------------------
+Finished             -------------------->
+</pre>
+<div class="figcaption">Figure 5 — Baseline TLS 1.3 Full Handshake</div>
+</div>
+
+<p>
+This separation is central to algorithm agility. Signature schemes can be
+replaced without modifying the key schedule or record-layer cryptography.
+</p>
+
+<h2>Post-Quantum Threat Model</h2>
+<p>
+The post-quantum threat model assumes an adversary capable of recording
+encrypted traffic today and decrypting it in the future using a cryptanalytically
+relevant quantum computer. While TLS 1.3 already mitigates many passive
+attacks, classical public-key signatures remain vulnerable under this model.
+</p>
+
+<p>
+Post-quantum authentication aims to preserve the long-term authenticity of
+recorded sessions, even if private keys are compromised by future advances
+in computation.
+</p>
+
+<h2>SLH-DSA Overview</h2>
+<p>
+SLH-DSA is a stateless hash-based digital signature algorithm standardized in
+NIST FIPS 205. Its security relies solely on the properties of cryptographic
+hash functions, avoiding algebraic assumptions used by lattice-based or
+elliptic-curve schemes.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+Private Key  -->  Hash-Based Tree Structure  -->  Signature
+Public Key   -->  Root Hash
+</pre>
+<div class="figcaption">Figure 6 — High-Level Structure of SLH-DSA</div>
+</div>
+
+<h2>Integration of SLH-DSA into TLS 1.3</h2>
+<p>
+RFC 9909 specifies how SLH-DSA is identified and negotiated in TLS. The
+integration is deliberately minimal, affecting only the signature algorithm
+registry and certificate handling logic.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+Handshake Transcript
+        |
+        v
+  Hash(Transcript)
+        |
+        v
+   SLH-DSA.Sign
+        |
+        v
+ CertificateVerify
+</pre>
+<div class="figcaption">Figure 7 — CertificateVerify Signing Flow with SLH-DSA</div>
+</div>
+
+<h2>TLS State Machine with Post-Quantum Authentication</h2>
+<p>
+From an implementation perspective, TLS is best modeled as a state machine.
+Post-quantum authentication introduces no new states; it only alters the
+verification logic at an existing transition.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+[START]
+   |
+   v
+CLIENT_HELLO_SENT
+   |
+   v
+SERVER_HELLO_RECEIVED
+   |
+   v
+CERTIFICATE_RECEIVED
+   |
+   v
+CERTIFICATE_VERIFY (SLH-DSA)
+   |
+   v
+HANDSHAKE_COMPLETE
+</pre>
+<div class="figcaption">Figure 8 — TLS State Machine with SLH-DSA Authentication</div>
+</div>
+
+<h2>ASN.1 Encoding and Certificate Processing</h2>
+<p>
+SLH-DSA public keys are carried in X.509 certificates using the
+<code>SubjectPublicKeyInfo</code> structure. No algorithm parameters are
+permitted, simplifying parsing but increasing sensitivity to length and
+encoding errors.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+SubjectPublicKeyInfo ::= SEQUENCE {
+  algorithm         AlgorithmIdentifier,
+  subjectPublicKey  BIT STRING
+}
+
+AlgorithmIdentifier ::= SEQUENCE {
+  algorithm   id-slh-dsa-256s-shake,
+  parameters  ABSENT
+}
+</pre>
+<div class="figcaption">Figure 9 — ASN.1 Encoding of SLH-DSA Public Keys</div>
+</div>
+
+<h2>Performance Considerations</h2>
+<p>
+The primary costs associated with SLH-DSA are signature size and verification
+time. These costs directly impact handshake bandwidth and CPU utilization,
+particularly for short-lived TLS connections.
+</p>
+
+<h2>Comparative Analysis: SLH-DSA and Dilithium</h2>
+<p>
+While both SLH-DSA and Dilithium are standardized post-quantum signature
+schemes, they represent different points in the design space.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+Security Assumptions
+   |
+   +--> Hash Functions (SLH-DSA)
+   |
+   +--> Lattice Problems (Dilithium)
+</pre>
+<div class="figcaption">Figure 10 — Security Assumption Comparison</div>
+</div>
+
+<p>
+SLH-DSA prioritizes conservative assumptions and long-term confidence, while
+Dilithium offers significantly better performance characteristics for
+high-throughput environments.
+</p>
+
+<h2>Operational Deployment Models</h2>
+<p>
+Real-world deployments may adopt hybrid strategies, using post-quantum
+signatures selectively or in combination with classical schemes during
+transition periods.
+</p>
+
+<div class="figure">
+<pre class="diagram">
+Client Capability Set
+   |
+   +--> Classical Only
+   +--> PQ Hybrid
+   +--> PQ-Only
+</pre>
+<div class="figcaption">Figure 11 — Deployment Capability Profiles</div>
+</div>
+
+<h2>Security Analysis Summary</h2>
+<p>
+The integration defined by RFC 9909 preserves TLS 1.3 security invariants.
+No additional attack surfaces are introduced beyond those inherent to the
+chosen signature scheme.
+</p>
+
+<h2>Conclusion</h2>
+<p>
+This extended discussion demonstrates that TLS 1.3 provides a robust
+foundation for post-quantum authentication. SLH-DSA can be integrated with
+minimal protocol disruption, enabling incremental migration strategies that
+align with operational realities.
+</p>
+
+<h2>References</h2>
+<ol>
+  <li>RFC 8446 — <em>The Transport Layer Security (TLS) Protocol Version 1.3</em></li>
+  <li>RFC 9909 — <em>Use of the SLH-DSA Signature Algorithm in TLS</em></li>
+  <li>NIST FIPS 205 — <em>Stateless Hash-Based Digital Signature Standard</em></li>
+</ol>
+
+---
+
+## Practical Implementation Examples and Code Walkthroughs
+
+This section extends the engineering discussion with concrete, implementation-oriented examples. The intent is not to provide drop-in production code, but to illustrate how SLH-DSA support is wired into existing TLS 1.3 stacks and where the non-obvious complexity arises.
+
+### Integrating SLH-DSA into a TLS 1.3 Stack
+
+From an implementation perspective, SLH-DSA support touches three primary layers:
+
+1. **Algorithm negotiation** (signature_algorithms extension)
+2. **Handshake transcript management**
+3. **CertificateVerify signing and verification**
+
+The majority of the TLS state machine remains unchanged. The complexity is localized to signature handling and key material management.
+
+---
+
+## Signature Algorithm Negotiation (Code-Level View)
+
+At the wire level, SLH-DSA appears as an additional value in the `signature_algorithms` extension. Internally, this typically maps to a new enum or constant.
+
+### Pseudocode: Signature Algorithm Registration
+
+```
+/* Pseudocode inspired by OpenSSL / BoringSSL style */
+
+typedef enum {
+    SIGALG_RSA_PSS_RSAE_SHA256,
+    SIGALG_ECDSA_SECP256R1_SHA256,
+    SIGALG_DILITHIUM3,
+    SIGALG_SLH_DSA_SHA2_128S,  /* RFC 9909 */
+    SIGALG_SLH_DSA_SHA2_192S,
+    SIGALG_SLH_DSA_SHA2_256S
+} tls_signature_algorithm;
+```
+
+Engineering note: unlike Dilithium, SLH-DSA variants are **hash-parameterized**, which means the TLS stack must treat each variant as a distinct algorithm rather than a single family.
+
+---
+
+## CertificateVerify Generation with SLH-DSA
+
+The `CertificateVerify` message signs the handshake transcript hash. For SLH-DSA, the signing operation is conceptually simple but computationally heavy.
+
+### Pseudocode: CertificateVerify Signing
+
+```
+handshake_hash = Hash(HandshakeMessages);
+
+signature = SLH_DSA_Sign(
+    private_key,
+    handshake_hash,
+    domain_separation = TLS_CERT_VERIFY
+);
+
+send CertificateVerify {
+    algorithm = slh_dsa_sha2_128s,
+    signature = signature
+};
+```
+
+Important engineering detail:
+- The **domain separation value** is critical. Reuse of SLH-DSA keys across protocols without strict domain separation is explicitly discouraged.
+
+---
+
+## Verification Path on the Peer
+
+Verification mirrors signing but exposes latency concerns, especially on constrained devices.
+
+### Pseudocode: CertificateVerify Verification
+
+```
+expected_hash = Hash(HandshakeMessages);
+
+if (!SLH_DSA_Verify(public_key, expected_hash, signature)) {
+    abort_handshake(TLS_ALERT_DECRYPT_ERROR);
+}
+```
+
+Unlike RSA or ECDSA, verification time for SLH-DSA is **non-trivial** and must be accounted for in handshake timeout logic.
+
+---
+
+## Flow Chart: CertificateVerify Processing
+
+```
++---------------------------+
+| Receive CertificateVerify |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Recompute transcript hash |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Identify signature alg    |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| SLH-DSA Verify Operation  |
++------+------+-------------+
+       |     |
+       |     v
+       |  Verification OK
+       |     |
+       |     v
+       |  Continue Handshake
+       v
+ Verification Failed
+       |
+       v
+ Abort with Alert
+```
+
+---
+
+## Memory and Performance Engineering
+
+SLH-DSA differs fundamentally from lattice-based schemes in memory behavior:
+
+- **Large signatures** (tens of kilobytes)
+- **High stack usage** during hash-tree traversal
+- **Predictable timing**, which simplifies side-channel analysis
+
+### Engineering Implication
+
+TLS implementations often need to:
+- Increase handshake buffer limits
+- Avoid stack allocation for signature buffers
+- Explicitly stream hash computations
+
+---
+
+## Hybrid Deployment Example
+
+Many real deployments will use **hybrid certificates** or parallel support for Dilithium and SLH-DSA.
+
+### Pseudocode: Hybrid Selection Logic
+
+```
+if (peer_supports(SLH_DSA) && policy_requires_hash_based) {
+    use SLH_DSA;
+} else if (peer_supports(DILITHIUM)) {
+    use DILITHIUM;
+} else {
+    fallback_to_classical();
+}
+```
+
+This logic is typically policy-driven rather than automatic, reflecting differing risk tolerances.
+
+---
+
+## Comparative Engineering Summary (Expanded)
+
+| Property            | SLH-DSA                  | Dilithium            |
+|---------------------|--------------------------|----------------------|
+| Security Assumption | Hash functions           | Lattice problems     |
+| Signature Size      | Very large               | Moderate             |
+| CPU Cost            | High                     | Medium               |
+| Side-channel Risk   | Low                      | Medium               |
+| Standard Status     | FIPS 205                 | FIPS 203             |
+| TLS Integration     | RFC 9909                 | Draft / Hybrid usage |
+
+---
+
+## Operational Guidance for Implementers
+
+- Enable SLH-DSA selectively, not universally
+- Monitor handshake latency explicitly
+- Use SLH-DSA for **high-value, long-lived trust anchors**
+- Prefer Dilithium for high-throughput endpoints
+
+---
+
+## Appendix C: Error Handling and Debugging
+
+Common failure modes observed in early implementations:
+
+- Transcript hash mismatch due to buffer truncation
+- Incorrect signature algorithm mapping
+- Handshake timeouts caused by underestimating verification cost
+
+These failures are often misdiagnosed as network issues rather than cryptographic integration problems.
+
+---
+
+## Appendix D: Test Vector Integration
+
+Although RFC 9909 does not mandate test vectors, implementers are encouraged to:
+
+- Reuse NIST SLH-DSA known-answer tests
+- Bind vectors to TLS transcript hashes
+- Validate deterministic verification behavior
+
+---
+
+## Closing Remarks
+
+The integration of SLH-DSA into TLS 1.3 represents a conservative, hash-based approach to post-quantum authentication. While the performance cost is substantial, the security model is simple, well-understood, and resilient against advances in quantum cryptanalysis.
+
+For environments prioritizing long-term cryptographic robustness over throughput, SLH-DSA provides a viable and standards-aligned solution.
+
+
+---
+
+## Code-Style Pseudocode: TLS 1.3 + SLH-DSA Integration
+
+This section presents implementation-oriented pseudocode in a style familiar to TLS stack developers (OpenSSL, BoringSSL, wolfSSL). The goal is to show *where* SLH-DSA fits, not to define a new API.
+
+---
+
+### 1. Signature Algorithm Definition and Registration
+
+At compile time, SLH-DSA algorithms are registered alongside classical and lattice-based signatures.
+
+```
+/* tls_sigalgs.h */
+
+typedef enum {
+    TLS_SIG_RSA_PSS_SHA256 = 0x0804,
+    TLS_SIG_ECDSA_P256_SHA256 = 0x0403,
+    TLS_SIG_DILITHIUM3 = 0xFEA0,
+
+    /* RFC 9909 */
+    TLS_SIG_SLH_DSA_SHA2_128S = 0xFEA1,
+    TLS_SIG_SLH_DSA_SHA2_192S = 0xFEA2,
+    TLS_SIG_SLH_DSA_SHA2_256S = 0xFEA3
+} tls_signature_scheme;
+```
+
+Engineering note: SLH-DSA parameter sets are *not interchangeable*. Each variant must be negotiated explicitly.
+
+---
+
+### 2. ClientHello: Advertising SLH-DSA Support
+
+The client includes SLH-DSA in the `signature_algorithms` extension.
+
+```
+void tls_build_signature_algorithms(ext_buffer *ext) {
+    ext_add(ext, TLS_SIG_ECDSA_P256_SHA256);
+    ext_add(ext, TLS_SIG_DILITHIUM3);
+    ext_add(ext, TLS_SIG_SLH_DSA_SHA2_128S);
+    ext_add(ext, TLS_SIG_SLH_DSA_SHA2_192S);
+}
+```
+
+Policy-driven stacks may conditionally advertise SLH-DSA only when required.
+
+---
+
+### 3. Server-Side Algorithm Selection
+
+The server selects the strongest mutually supported algorithm consistent with policy.
+
+```
+tls_signature_scheme
+select_signature_algorithm(client_list, server_policy) {
+    if (server_policy.require_hash_based) {
+        return first_match(client_list, SLH_DSA_FAMILY);
+    }
+    if (client_supports(TLS_SIG_DILITHIUM3)) {
+        return TLS_SIG_DILITHIUM3;
+    }
+    return TLS_SIG_ECDSA_P256_SHA256;
+}
+```
+
+---
+
+### 4. CertificateVerify: Signing with SLH-DSA
+
+The handshake transcript is hashed exactly as in classical TLS 1.3.
+
+```
+/* tls_handshake.c */
+
+hash = tls_transcript_hash(ctx);
+
+signature = slh_dsa_sign(
+    ctx->server_private_key,
+    hash,
+    TLS_CONTEXT_CERTIFICATE_VERIFY
+);
+
+send_certificate_verify(
+    ctx->selected_sigalg,
+    signature
+);
+```
+
+Critical detail: the context string (`TLS_CONTEXT_CERTIFICATE_VERIFY`) provides domain separation and must match RFC 8446 semantics.
+
+---
+
+### 5. Client-Side Verification Path
+
+```
+received_sig = msg->certificate_verify.signature;
+expected_hash = tls_transcript_hash(ctx);
+
+ok = slh_dsa_verify(
+    peer_public_key,
+    expected_hash,
+    received_sig
+);
+
+if (!ok) {
+    tls_fatal_alert(TLS_ALERT_DECRYPT_ERROR);
+}
+```
+
+Unlike ECDSA, verification cost is significant and may dominate handshake latency.
+
+---
+
+### 6. TLS State-Machine Integration (Code View)
+
+```
+switch (handshake_state) {
+case STATE_CERTIFICATE:
+    parse_certificate();
+    break;
+
+case STATE_CERT_VERIFY:
+    if (sigalg_is_slh_dsa(ctx->selected_sigalg)) {
+        verify_slh_dsa();
+    } else {
+        verify_classical();
+    }
+    break;
+
+case STATE_FINISHED:
+    send_finished();
+    break;
+}
+```
+
+No new handshake states are introduced; SLH-DSA plugs into an existing transition.
+
+---
+
+### 7. Error Handling and Alerts
+
+```
+if (slh_dsa_verify_failed) {
+    log("SLH-DSA verification failure");
+    abort_handshake(TLS_ALERT_DECRYPT_ERROR);
+}
+```
+
+Implementers should avoid leaking timing or error-detail differences between signature algorithms.
+
+---
+
+### 8. Memory Management Considerations
+
+```
+/* Avoid stack allocation for large signatures */
+signature = heap_alloc(SLH_DSA_MAX_SIGLEN);
+
+if (!signature) {
+    abort_handshake(TLS_ALERT_INTERNAL_ERROR);
+}
+```
+
+SLH-DSA signatures are orders of magnitude larger than ECDSA and must be handled explicitly.
+
+---
+
+### 9. Hybrid Deployment Example (Policy Layer)
+
+```
+if (conn->long_term_security_required) {
+    conn->allowed_sigalgs = SLH_DSA_ONLY;
+} else {
+    conn->allowed_sigalgs = DILITHIUM | ECDSA;
+}
+```
+
+This separation keeps cryptographic policy out of the core TLS state machine.
+
+---
+
+### 10. Engineering Takeaway
+
+From a code perspective, SLH-DSA integration is *surgically localized*. The TLS protocol logic remains unchanged; only signature negotiation, signing, verification, and memory handling require modification.
+
+This property validates the cryptographic agility goals of TLS 1.3 and supports incremental post-quantum migration strategies.
+
