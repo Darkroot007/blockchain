@@ -1,0 +1,213 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { networkingPageData } from '../data/networking';
+
+const page = networkingPageData;
+---
+
+<Layout title="Networking & 5G | ChainLearn">
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">{page.brand}</div>
+      <nav>
+        <ul>
+          {page.nav.map((item) => <li>{item}</li>)}
+        </ul>
+      </nav>
+      <button>{page.cta}</button>
+    </header>
+
+    <section class="hero">
+      <a href="#">{page.breadcrumb}</a>
+      <p class="category">{page.category}</p>
+      <h1>{page.title}</h1>
+      <p class="description">{page.description}</p>
+      <div class="stats">
+        <span>{page.stats.lessons}</span>
+        <span>{page.stats.certification}</span>
+        <span>{page.stats.level}</span>
+      </div>
+    <p id="api-status" class="api-status">Loading course data from /api/networking…</p>
+
+    </section>
+
+    <section class="modules">
+      <h2>Learning Modules</h2>
+      <ul>
+        {
+          page.modules.map((module) => (
+            <li>
+              <h3>{module.title}</h3>
+              <p>
+                {module.lessons} lessons <span>•</span> {module.duration}
+              </p>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <footer>
+      <div class="footer-main">
+        <div>
+          <h3>{page.brand}</h3>
+          <p>{page.footerDescription}</p>
+        </div>
+        <div>
+          <h4>Topics</h4>
+          <ul>{page.footerTopics.map((topic) => <li>{topic}</li>)}</ul>
+        </div>
+        <div>
+          <h4>Resources</h4>
+          <ul>{page.footerResources.map((resource) => <li>{resource}</li>)}</ul>
+        </div>
+      </div>
+      <div class="legal">
+        <p>{page.legal.copyright}</p>
+        <ul>{page.legal.links.map((link) => <li>{link}</li>)}</ul>
+      </div>
+    </footer>
+  </main>
+</Layout>
+
+<style>
+  .page {
+    min-height: 100vh;
+    background: radial-gradient(circle at top right, #22144f, #0f172a 40%, #020617);
+    color: #f8fafc;
+    padding: 2rem clamp(1rem, 3vw, 3rem);
+    font-family: InterVariable, sans-serif;
+  }
+
+  .topbar,
+  .footer-main,
+  .legal {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  nav ul,
+  .legal ul {
+    display: flex;
+    gap: 1rem;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    color: #cbd5e1;
+  }
+
+  .topbar button {
+    border: 0;
+    border-radius: 999px;
+    padding: 0.6rem 1rem;
+    font-weight: 700;
+    background: #6366f1;
+    color: #fff;
+  }
+
+  .hero {
+    margin-top: 3rem;
+    max-width: 800px;
+  }
+
+  .hero a,
+  .category {
+    color: #93c5fd;
+    font-size: 0.9rem;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    margin: 0.5rem 0 1rem;
+  }
+
+  .description {
+    color: #dbeafe;
+    line-height: 1.7;
+  }
+
+  .stats {
+    display: flex;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+  }
+
+  .stats span {
+    border: 1px solid #334155;
+    background: #0f172a;
+    border-radius: 999px;
+    padding: 0.35rem 0.8rem;
+    font-size: 0.9rem;
+  }
+
+  .modules {
+    margin: 2.25rem 0 3rem;
+  }
+
+  .modules ul {
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  .modules li {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid #334155;
+    border-radius: 0.9rem;
+    padding: 1rem;
+  }
+
+  .modules p {
+    color: #cbd5e1;
+  }
+
+  footer {
+    border-top: 1px solid #334155;
+    padding-top: 1.5rem;
+    color: #cbd5e1;
+  }
+
+  .footer-main {
+    align-items: start;
+  }
+
+  .footer-main ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .api-status {
+    margin-top: 0.9rem;
+    color: #93c5fd;
+    font-size: 0.9rem;
+  }
+</style>
+
+<script>
+  const statusEl = document.querySelector('#api-status');
+
+  fetch('/api/networking')
+    .then((res) => res.json())
+    .then((data) => {
+      if (!statusEl) return;
+      statusEl.textContent = `API connected: ${data.modules.length} modules available.`;
+    })
+    .catch(() => {
+      if (!statusEl) return;
+      statusEl.textContent = 'Could not load API data right now.';
+    });
+</script>
+
